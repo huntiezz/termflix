@@ -3,18 +3,17 @@ package app
 import (
 	"context"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/charmbracelet/log"
 
-	"github.com/example/termflix/internal/audio"
-	"github.com/example/termflix/internal/media"
-	"github.com/example/termflix/internal/player"
-	"github.com/example/termflix/internal/source"
-	"github.com/example/termflix/internal/term"
-	"github.com/example/termflix/internal/tui"
-	"github.com/example/termflix/internal/util"
+	"github.com/huntiezz/termflix/internal/audio"
+	"github.com/huntiezz/termflix/internal/media"
+	"github.com/huntiezz/termflix/internal/player"
+	"github.com/huntiezz/termflix/internal/source"
+	"github.com/huntiezz/termflix/internal/term"
+	"github.com/huntiezz/termflix/internal/tui"
+	"github.com/huntiezz/termflix/internal/util"
 )
 
 // App wires the high-level application pieces together.

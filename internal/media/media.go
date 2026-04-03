@@ -8,7 +8,7 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/example/termflix/internal/source"
+	"github.com/huntiezz/termflix/internal/source"
 )
 
 // Info holds parsed media metadata.

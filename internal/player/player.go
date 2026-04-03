@@ -5,11 +5,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/example/termflix/internal/decoder"
-	"github.com/example/termflix/internal/media"
-	"github.com/example/termflix/internal/render"
-	"github.com/example/termflix/internal/source"
-	"github.com/example/termflix/internal/util"
+	"github.com/huntiezz/termflix/internal/decoder"
+	"github.com/huntiezz/termflix/internal/media"
+	"github.com/huntiezz/termflix/internal/render"
+	"github.com/huntiezz/termflix/internal/source"
+	"github.com/huntiezz/termflix/internal/util"
 )
 
 // Config controls player behaviour.

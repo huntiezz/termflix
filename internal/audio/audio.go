@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/example/termflix/internal/util"
+	"github.com/huntiezz/termflix/internal/util"
 )
 
 // Options configure the audio controller.
