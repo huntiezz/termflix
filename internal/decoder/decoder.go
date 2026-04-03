@@ -24,6 +24,7 @@ type Config struct {
 	Height     int
 	FPSCap     int
 	StartAt    float64 // seconds
+	Realtime   bool    // throttle read to realtime
 }
 
 // Decoder spawns ffmpeg and exposes frames over a channel.
@@ -47,6 +48,9 @@ func (d *Decoder) Start(ctx context.Context) (<-chan Frame, <-chan error, error)
 	args := []string{
 		"-hide_banner",
 		"-loglevel", "error",
+	}
+	if d.cfg.Realtime {
+		args = append(args, "-re")
 	}
 	if d.cfg.StartAt > 0 {
 		args = append(args, "-ss", fmt.Sprintf("%.3f", d.cfg.StartAt))

@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/help"
@@ -66,6 +67,7 @@ type Config struct {
 }
 
 type Model struct {
+	ctx    context.Context
 	player *player.Player
 	cfg    Config
 
@@ -78,6 +80,10 @@ type Model struct {
 	showHelp bool
 
 	err error
+
+	lastSeq  uint64
+	lastMode util.RenderMode
+	lastBody string
 }
 
 func NewModel(p *player.Player, cfg Config) Model {
@@ -97,6 +103,7 @@ type Result struct {
 
 // RunProgram starts the Bubble Tea program.
 func RunProgram(ctx context.Context, m Model) (Result, error) {
+	m.ctx = ctx
 	p := tea.NewProgram(m, tea.WithContext(ctx), tea.WithAltScreen())
 	res, err := p.Run()
 	if err != nil {
@@ -108,12 +115,15 @@ func RunProgram(ctx context.Context, m Model) (Result, error) {
 	return Result{}, nil
 }
 
+type redrawMsg struct{}
+
+func redrawTick() tea.Cmd {
+	return tea.Tick(33*time.Millisecond, func(time.Time) tea.Msg { return redrawMsg{} })
+}
+
 // Init starts the player.
 func (m Model) Init() tea.Cmd {
-	if m.width > 0 && m.height > 0 {
-		go m.player.Start(context.Background(), m.width, m.height-2)
-	}
-	return nil
+	return redrawTick()
 }
 
 // Update handles messages.
@@ -142,10 +152,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.ToggleHelp):
 			m.showHelp = !m.showHelp
 		}
+		return m, redrawTick()
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		go m.player.Start(context.Background(), m.width, m.height-2)
+		if m.ctx != nil {
+			go m.player.Start(m.ctx, m.width, m.height-2)
+		}
+		return m, redrawTick()
+	case redrawMsg:
+		return m, redrawTick()
 	}
 	return m, nil
 }
@@ -165,17 +181,57 @@ func (m Model) View() string {
 	}
 
 	var body string
-	if st.Frame.Cols > 0 && st.Frame.Rows > 0 {
-		body = render.Render(st.Frame, mode)
+	if m.showHelp {
+		body = m.help.View(m.keys)
+	} else if st.Frame.Cols > 0 && st.Frame.Rows > 0 {
+		// Cache rendered output so we don't re-render the same frame on every tick.
+		if st.Seq == m.lastSeq && st.Mode == m.lastMode && m.lastBody != "" {
+			body = m.lastBody
+		} else {
+			body = render.Render(st.Frame, mode)
+			body = padToViewport(body, m.width, max(0, m.height-2))
+			m.lastSeq = st.Seq
+			m.lastMode = st.Mode
+			m.lastBody = body
+		}
+	} else {
+		body = padToViewport("", m.width, max(0, m.height-2))
 	}
 
 	status := m.renderStatus(st)
 
-	if m.showHelp {
-		body = m.help.View(m.keys)
-	}
-
 	return body + "\n" + status
+}
+
+func padToViewport(body string, width, lines int) string {
+	if width <= 0 || lines <= 0 {
+		return body
+	}
+	parts := strings.Split(strings.TrimSuffix(body, "\n"), "\n")
+	if len(parts) == 1 && parts[0] == "" {
+		parts = []string{}
+	}
+	// pad/truncate lines
+	out := make([]string, 0, lines)
+	for i := 0; i < lines; i++ {
+		ln := ""
+		if i < len(parts) {
+			ln = parts[i]
+		}
+		w := lipgloss.Width(ln)
+		if w < width {
+			ln = ln + strings.Repeat(" ", width-w)
+		}
+		out = append(out, ln)
+	}
+	return strings.Join(out, "\n")
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func (m Model) renderStatus(st player.State) string {
@@ -202,6 +258,9 @@ func (m Model) renderStatus(st player.State) string {
 	left := fmt.Sprintf(" %s ", m.cfg.Title)
 	center := fmt.Sprintf("%s/%s  %s  %.1ffps", formatDuration(st.Position), formatDuration(st.Duration), mode, st.FPSActual)
 	right := fmt.Sprintf("%s %s", muted, paused)
+	if st.Err != "" {
+		right = "error"
+	}
 
 	content := lipgloss.JoinHorizontal(lipgloss.Left, left, center, right)
 	if m.width > 0 {

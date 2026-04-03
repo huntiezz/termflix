@@ -23,7 +23,8 @@ const (
 type Source struct {
 	Type      Type
 	Input     string // original input
-	PlayURL   string // direct media URL or file path
+	PlayURL   string // direct media URL or file path (video or combined)
+	AudioURL  string // optional separate audio URL; falls back to PlayURL
 	Title     string
 	FromStdin bool
 }
@@ -35,6 +36,7 @@ func Detect(ctx context.Context, input, ytdlpPath string) (Source, error) {
 			Type:      TypeStdin,
 			Input:     input,
 			PlayURL:   "pipe:0",
+			AudioURL:  "pipe:0",
 			FromStdin: true,
 		}, nil
 	}
@@ -48,6 +50,7 @@ func Detect(ctx context.Context, input, ytdlpPath string) (Source, error) {
 			Type:    TypeFile,
 			Input:   input,
 			PlayURL: input,
+			AudioURL: input,
 		}, nil
 	}
 
@@ -59,6 +62,7 @@ func Detect(ctx context.Context, input, ytdlpPath string) (Source, error) {
 		Type:    TypeFile,
 		Input:   input,
 		PlayURL: input,
+		AudioURL: input,
 	}, nil
 }
 
@@ -91,7 +95,8 @@ func resolveYouTube(ctx context.Context, rawURL, ytdlpPath string) (Source, erro
 	//
 	// We select the first URL line; ffmpeg will handle many direct media URLs.
 	cmd := exec.CommandContext(ctx, ytdlpPath,
-		"-f", "best",
+		// Prefer separate streams (video+audio) and fall back to a combined stream.
+		"-f", "bestvideo+bestaudio/best",
 		"--no-playlist",
 		"--no-warnings",
 		"--print", "title",
@@ -116,21 +121,26 @@ func resolveYouTube(ctx context.Context, rawURL, ytdlpPath string) (Source, erro
 		return Source{}, fmt.Errorf("yt-dlp did not return expected output (title + url)")
 	}
 	title := lines[0]
-	playURL := ""
+	urls := make([]string, 0, len(lines)-1)
 	for _, ln := range lines[1:] {
 		if strings.HasPrefix(ln, "http://") || strings.HasPrefix(ln, "https://") {
-			playURL = ln
-			break
+			urls = append(urls, ln)
 		}
 	}
-	if playURL == "" {
+	if len(urls) == 0 {
 		return Source{}, fmt.Errorf("yt-dlp did not return a playable URL")
+	}
+	playURL := urls[0]
+	audioURL := playURL
+	if len(urls) >= 2 {
+		audioURL = urls[1]
 	}
 
 	return Source{
 		Type:    TypeYouTube,
 		Input:   rawURL,
 		PlayURL: playURL,
+		AudioURL: audioURL,
 		Title:   title,
 	}, nil
 }

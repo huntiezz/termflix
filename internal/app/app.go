@@ -16,6 +16,15 @@ import (
 	"github.com/huntiezz/termflix/internal/util"
 )
 
+func firstNonEmpty(v ...string) string {
+	for _, s := range v {
+		if s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
 // App wires the high-level application pieces together.
 type App struct {
 	args   []string
@@ -41,6 +50,7 @@ func (a *App) Run(ctx context.Context) error {
 		return err
 	}
 
+	startedFromLauncher := false
 	if cfg.Input == "" {
 		res, err := tui.RunLauncher(ctx, cfg)
 		if err != nil {
@@ -50,10 +60,27 @@ func (a *App) Run(ctx context.Context) error {
 			return nil
 		}
 		cfg = res.Config
+		startedFromLauncher = true
 	}
 
 	if err := util.CheckRequiredBinaries(cfg); err != nil {
+		if startedFromLauncher {
+			return tui.RunError(ctx, err)
+		}
 		return err
+	}
+	// Resolve to absolute paths when possible (Windows-friendly).
+	if p, err := util.ResolveBinary(cfg.FFMPEGPath, "ffmpeg"); err == nil && p != "" {
+		cfg.FFMPEGPath = p
+	}
+	if p, err := util.ResolveBinary(cfg.FFProbePath, "ffprobe"); err == nil && p != "" {
+		cfg.FFProbePath = p
+	}
+	if p, err := util.ResolveBinary(cfg.MPVPath, "mpv"); err == nil && p != "" {
+		cfg.MPVPath = p
+	}
+	if p, err := util.ResolveBinary(cfg.FFPlayPath, "ffplay"); err == nil && p != "" {
+		cfg.FFPlayPath = p
 	}
 
 	// Best-effort resolve yt-dlp upfront so YouTube URLs work even when
@@ -64,18 +91,28 @@ func (a *App) Run(ctx context.Context) error {
 
 	src, err := source.Detect(ctx, cfg.Input, cfg.YTDLPPath)
 	if err != nil {
+		if startedFromLauncher {
+			return tui.RunError(ctx, err)
+		}
 		return err
 	}
 
 	if src.Type == source.TypeYouTube {
 		if err := util.CheckYouTubeBinary(cfg.YTDLPPath); err != nil {
+			if startedFromLauncher {
+				return tui.RunError(ctx, err)
+			}
 			return err
 		}
 	}
 
 	meta, err := media.Probe(ctx, cfg.FFProbePath, src)
 	if err != nil {
-		return fmt.Errorf("probe media: %w", err)
+		wrapped := fmt.Errorf("probe media: %w", err)
+		if startedFromLauncher {
+			return tui.RunError(ctx, wrapped)
+		}
+		return wrapped
 	}
 
 	playCfg := player.Config{
@@ -87,12 +124,21 @@ func (a *App) Run(ctx context.Context) error {
 		Height:     cfg.Height,
 	}
 
+	// If the user didn't request an audio engine explicitly, pick one if available.
+	if cfg.AudioEngine == util.AudioEngineNone && !cfg.Mute {
+		if cfg.MPVPath != "" {
+			cfg.AudioEngine = util.AudioEngineMPV
+		} else if cfg.FFPlayPath != "" {
+			cfg.AudioEngine = util.AudioEngineFFPlay
+		}
+	}
+
 	audioCtrl := audio.NewController(audio.Options{
 		Engine:   cfg.AudioEngine,
 		Muted:    cfg.Mute,
 		FFPlay:   cfg.FFPlayPath,
 		MPV:      cfg.MPVPath,
-		InputURL: src.PlayURL,
+		InputURL: firstNonEmpty(src.AudioURL, src.PlayURL),
 		SeekFunc: nil, // wired by player as needed
 	})
 
@@ -108,18 +154,14 @@ func (a *App) Run(ctx context.Context) error {
 		FPS:          cfg.FPS,
 	})
 
-	if err := term.EnableAltScreen(); err != nil {
-		return err
-	}
-	defer func() {
-		_ = term.Restore()
-	}()
-
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	res, err := tui.RunProgram(ctx, model)
 	if err != nil {
+		if startedFromLauncher {
+			return tui.RunError(ctx, err)
+		}
 		return err
 	}
 
@@ -130,6 +172,9 @@ func (a *App) Run(ctx context.Context) error {
 	}
 
 	if res.Err != nil {
+		if startedFromLauncher {
+			return tui.RunError(ctx, res.Err)
+		}
 		return res.Err
 	}
 

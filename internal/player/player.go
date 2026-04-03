@@ -2,6 +2,8 @@ package player
 
 import (
 	"context"
+	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -41,6 +43,8 @@ type State struct {
 	FPS      int
 	FPSActual float64
 	Frame    render.ScaledFrame
+	Err      string
+	Seq      uint64
 }
 
 // Player coordinates decoding, timing, and state.
@@ -77,8 +81,12 @@ func (p *Player) Snapshot() State {
 	return p.state
 }
 
-// Start begins playback loop and decoding. It should be called once.
+// Start begins (or restarts) playback with the given terminal size.
 func (p *Player) Start(ctx context.Context, termCols, termRows int) {
+	// Cancel any prior decode loop (resize/restart).
+	if p.cancelFn != nil {
+		p.cancelFn()
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	p.cancelFn = cancel
 
@@ -92,32 +100,37 @@ func (p *Player) run(ctx context.Context, termCols, termRows int) {
 	)
 
 	startDecoder := func(offset time.Duration) {
+		w, h := p.decodeSize(termCols, termRows)
+		if w <= 0 || h <= 0 {
+			p.setErr(fmt.Errorf("could not determine decode size (term %dx%d, media %dx%d)", termCols, termRows, p.meta.Width, p.meta.Height))
+			return
+		}
 		dec := decoder.New(decoder.Config{
 			FFMPEGPath: p.cfg.FFMPEGPath,
 			InputURL:   p.meta.StreamURL,
-			Width:      p.cfg.Width,
-			Height:     p.cfg.Height,
+			Width:      w,
+			Height:     h,
 			FPSCap:     p.cfg.FPSCap,
 			StartAt:    offset.Seconds(),
+			Realtime:   true,
 		})
 		var err error
 		frameCh, errCh, err = dec.Start(ctx)
 		if err != nil {
+			p.setErr(err)
 			return
 		}
 	}
 
 	startDecoder(0)
+	if frameCh == nil {
+		// decoder didn't start; keep UI alive for error display
+		<-ctx.Done()
+		return
+	}
 	if p.audio != nil && !p.audio.IsMuted() {
 		_ = p.audio.Play(0)
 	}
-
-	effective := p.effectiveFPS()
-	if effective <= 0 {
-		effective = 60
-	}
-	tick := time.NewTicker(time.Second / time.Duration(effective))
-	defer tick.Stop()
 
 	var lastFrameTime time.Time
 	for {
@@ -128,17 +141,91 @@ func (p *Player) run(ctx context.Context, termCols, termRows int) {
 			}
 			return
 		case err := <-errCh:
-			_ = err
+			p.setErr(err)
 			return
 		case f, ok := <-frameCh:
 			if !ok {
 				return
 			}
 			p.handleFrame(f, termCols, termRows, &lastFrameTime)
-		case <-tick.C:
-			// timing tick; position update is derived from frames.
 		}
 	}
+}
+
+func (p *Player) setErr(err error) {
+	if err == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.state.Err = err.Error()
+	// Pause so the last frame stays visible (or blank) and status reflects a stop.
+	p.state.Paused = true
+}
+
+// decodeSize chooses an ffmpeg output size based on terminal and media dimensions.
+// termRows counts terminal rows; for block rendering we treat one cell as ~2 vertical pixels.
+func (p *Player) decodeSize(termCols, termRows int) (int, int) {
+	if p.cfg.Width > 0 && p.cfg.Height > 0 {
+		return even(p.cfg.Width), even(p.cfg.Height)
+	}
+	if termCols <= 0 || termRows <= 0 {
+		return 0, 0
+	}
+
+	// Target pixel budget roughly matching "blocks" mode vertical resolution.
+	targetW := termCols
+	targetH := termRows * 2
+
+	srcW := p.meta.Width
+	srcH := p.meta.Height
+	if srcW <= 0 || srcH <= 0 {
+		// Safe fallback if metadata is missing.
+		return even(targetW), even(targetH)
+	}
+
+	sx := float64(targetW) / float64(srcW)
+	sy := float64(targetH) / float64(srcH)
+
+	scale := sx
+	if p.state.FitMode == util.FitModeFit {
+		if sy < sx {
+			scale = sy
+		}
+	} else { // fill
+		if sy > sx {
+			scale = sy
+		}
+	}
+
+	w := int(math.Round(float64(srcW) * scale))
+	h := int(math.Round(float64(srcH) * scale))
+	if w < 1 {
+		w = 1
+	}
+	if h < 1 {
+		h = 1
+	}
+	// Keep within budget.
+	if p.state.FitMode == util.FitModeFit {
+		if w > targetW {
+			w = targetW
+		}
+		if h > targetH {
+			h = targetH
+		}
+	}
+	return even(w), even(h)
+}
+
+func even(v int) int {
+	if v <= 1 {
+		return 1
+	}
+	if v%2 == 1 {
+		return v - 1
+	}
+	return v
 }
 
 func (p *Player) handleFrame(f decoder.Frame, termCols, termRows int, last *time.Time) {
@@ -148,6 +235,8 @@ func (p *Player) handleFrame(f decoder.Frame, termCols, termRows int, last *time
 	if p.state.Paused {
 		return
 	}
+	p.state.Err = ""
+	p.state.Seq++
 
 	buf := render.FrameBuffer{
 		Width:  f.Width,
@@ -166,23 +255,14 @@ func (p *Player) handleFrame(f decoder.Frame, termCols, termRows int, last *time
 			p.state.FPSActual = 1 / sec
 		}
 
-		// Drive position from real frame timing when source FPS isn't known.
-		if p.meta.FPS <= 0 {
-			p.state.Position += dt
-			if p.state.Duration > 0 && p.state.Position > p.state.Duration {
-				p.state.Position = p.state.Duration
-			}
-		}
-	}
-	*last = now
-
-	stepFPS := p.effectiveFPS()
-	if stepFPS > 0 {
-		p.state.Position += time.Second / time.Duration(stepFPS)
+		// Drive position from real-time frame spacing. This stays correct even if
+		// rendering is slow or fps is capped.
+		p.state.Position += dt
 		if p.state.Duration > 0 && p.state.Position > p.state.Duration {
 			p.state.Position = p.state.Duration
 		}
 	}
+	*last = now
 }
 
 func (p *Player) effectiveFPS() int {
