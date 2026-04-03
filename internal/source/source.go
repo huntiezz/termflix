@@ -3,7 +3,6 @@ package source
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
@@ -77,18 +76,25 @@ func isYouTubeURL(s string) bool {
 	return strings.Contains(host, "youtube.com") || strings.Contains(host, "youtu.be")
 }
 
-type ytDLPResult struct {
-	URL   string `json:"url"`
-	Title string `json:"title"`
-}
-
 // resolveYouTube runs yt-dlp to obtain a playable URL and metadata.
 func resolveYouTube(ctx context.Context, rawURL, ytdlpPath string) (Source, error) {
 	if ytdlpPath == "" {
 		ytdlpPath = "yt-dlp"
 	}
 
-	cmd := exec.CommandContext(ctx, ytdlpPath, "-J", "-f", "bv*+ba/b", rawURL)
+	// Use "-g" to print direct media URL(s). It's more stable than parsing -J JSON
+	// across extractor variations.
+	//
+	// Output is typically 1-2 lines (video URL, audio URL). For playback we can
+	// hand ffmpeg the first line and let it handle muxing for many formats.
+	cmd := exec.CommandContext(ctx, ytdlpPath,
+		"-f", "bv*+ba/b",
+		"--no-playlist",
+		"--no-warnings",
+		"--print", "title",
+		"-g",
+		rawURL,
+	)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	var stderr bytes.Buffer
@@ -99,27 +105,37 @@ func resolveYouTube(ctx context.Context, rawURL, ytdlpPath string) (Source, erro
 		if msg == "" {
 			msg = err.Error()
 		}
-		return Source{}, fmt.Errorf("yt-dlp failed: %s", strings.TrimSpace(msg))
+		return Source{}, fmt.Errorf("yt-dlp failed (is it installed and on PATH?): %s", strings.TrimSpace(msg))
 	}
 
-	var data ytDLPResult
-	if err := json.Unmarshal(out.Bytes(), &data); err != nil {
-		return Source{}, fmt.Errorf("parse yt-dlp output: %w", err)
+	lines := splitNonEmptyLines(out.String())
+	if len(lines) < 2 {
+		return Source{}, fmt.Errorf("yt-dlp did not return expected output (title + url)")
 	}
-	if data.URL == "" {
+	title := lines[0]
+	playURL := lines[1]
+	if playURL == "" {
 		return Source{}, fmt.Errorf("yt-dlp did not return a playable URL")
-	}
-
-	title := data.Title
-	if title == "" {
-		title = rawURL
 	}
 
 	return Source{
 		Type:    TypeYouTube,
 		Input:   rawURL,
-		PlayURL: data.URL,
+		PlayURL: playURL,
 		Title:   title,
 	}, nil
+}
+
+func splitNonEmptyLines(s string) []string {
+	raw := strings.Split(s, "\n")
+	out := make([]string, 0, len(raw))
+	for _, line := range raw {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		out = append(out, line)
+	}
+	return out
 }
 

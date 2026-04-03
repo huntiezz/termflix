@@ -58,7 +58,7 @@ func ParseFlags(args []string) (Config, error) {
 
 	var (
 		modeStr   = fs.String("mode", string(RenderModeBlocks), "render mode: blocks|braille|ascii")
-		fps       = fs.Int("fps", 15, "max frames per second")
+		fps       = fs.Int("fps", 0, "FPS cap (0=use source FPS)")
 		mute      = fs.Bool("mute", false, "start muted")
 		audioStr  = fs.String("audio", string(AudioEngineNone), "audio backend: none|mpv|ffplay")
 		width     = fs.Int("width", 0, "target width (0=auto)")
@@ -97,8 +97,8 @@ func ParseFlags(args []string) (Config, error) {
 		return Config{}, fmt.Errorf("invalid audio engine %q (expected none|mpv|ffplay)", *audioStr)
 	}
 
-	if *fps <= 0 {
-		return Config{}, fmt.Errorf("fps must be positive, got %d", *fps)
+	if *fps < 0 {
+		return Config{}, fmt.Errorf("fps must be >= 0, got %d", *fps)
 	}
 
 	fitMode := FitModeFit

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"strings"
 )
 
 // Frame represents a raw RGB frame.
@@ -21,7 +22,7 @@ type Config struct {
 	InputURL   string
 	Width      int
 	Height     int
-	FPS        int
+	FPSCap     int
 	StartAt    float64 // seconds
 }
 
@@ -55,11 +56,17 @@ func (d *Decoder) Start(ctx context.Context) (<-chan Frame, <-chan error, error)
 		"-f", "rawvideo",
 		"-pix_fmt", "rgb24",
 	)
+
+	var filters []string
 	if d.cfg.Width > 0 && d.cfg.Height > 0 {
-		args = append(args, "-vf", fmt.Sprintf("scale=%d:%d", d.cfg.Width, d.cfg.Height))
+		filters = append(filters, fmt.Sprintf("scale=%d:%d", d.cfg.Width, d.cfg.Height))
 	}
-	if d.cfg.FPS > 0 {
-		args = append(args, "-r", fmt.Sprintf("%d", d.cfg.FPS))
+	if d.cfg.FPSCap > 0 {
+		// Use filter-based FPS cap to avoid altering timestamps with output -r.
+		filters = append(filters, fmt.Sprintf("fps=%d", d.cfg.FPSCap))
+	}
+	if len(filters) > 0 {
+		args = append(args, "-vf", strings.Join(filters, ","))
 	}
 	args = append(args, "pipe:1")
 
