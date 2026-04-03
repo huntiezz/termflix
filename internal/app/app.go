@@ -56,6 +56,12 @@ func (a *App) Run(ctx context.Context) error {
 		return err
 	}
 
+	// Best-effort resolve yt-dlp upfront so YouTube URLs work even when
+	// installed by winget/scoop but not yet on PATH.
+	if p, err := util.ResolveBinary(cfg.YTDLPPath, "yt-dlp"); err == nil && p != "" {
+		cfg.YTDLPPath = p
+	}
+
 	src, err := source.Detect(ctx, cfg.Input, cfg.YTDLPPath)
 	if err != nil {
 		return err
