@@ -117,6 +117,9 @@ func (d *Decoder) Start(ctx context.Context) (<-chan Frame, <-chan error, error)
 			case frames <- Frame{Width: d.cfg.Width, Height: d.cfg.Height, Data: cp}:
 			case <-ctx.Done():
 				return
+			default:
+				// Drop frames when rendering can't keep up, to avoid backpressure
+				// that would stall ffmpeg and cause very low FPS.
 			}
 		}
 	}()

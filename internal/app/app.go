@@ -126,10 +126,11 @@ func (a *App) Run(ctx context.Context) error {
 
 	// If the user didn't request an audio engine explicitly, pick one if available.
 	if cfg.AudioEngine == util.AudioEngineNone && !cfg.Mute {
-		if cfg.MPVPath != "" {
-			cfg.AudioEngine = util.AudioEngineMPV
-		} else if cfg.FFPlayPath != "" {
+		// Prefer ffplay for simplest "play audio from the file/URL".
+		if cfg.FFPlayPath != "" {
 			cfg.AudioEngine = util.AudioEngineFFPlay
+		} else if cfg.MPVPath != "" {
+			cfg.AudioEngine = util.AudioEngineMPV
 		}
 	}
 
@@ -152,6 +153,7 @@ func (a *App) Run(ctx context.Context) error {
 		Duration:     meta.Duration,
 		InitialMuted: cfg.Mute,
 		FPS:          cfg.FPS,
+		AudioEngine:  cfg.AudioEngine,
 	})
 
 	ctx, cancel := context.WithCancel(ctx)

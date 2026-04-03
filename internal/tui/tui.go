@@ -64,6 +64,7 @@ type Config struct {
 	Duration     time.Duration
 	InitialMuted bool
 	FPS          int
+	AudioEngine  util.AudioEngine
 }
 
 type Model struct {
@@ -246,9 +247,14 @@ func (m Model) renderStatus(st player.State) string {
 		mode = "blocks"
 	}
 
-	muted := "audio"
+	audioLabel := string(m.cfg.AudioEngine)
+	if audioLabel == "" {
+		audioLabel = "none"
+	}
 	if st.Muted {
-		muted = "muted"
+		audioLabel = "muted"
+	} else if m.cfg.AudioEngine == util.AudioEngineNone {
+		audioLabel = "silent"
 	}
 	paused := ""
 	if st.Paused {
@@ -257,7 +263,7 @@ func (m Model) renderStatus(st player.State) string {
 
 	left := fmt.Sprintf(" %s ", m.cfg.Title)
 	center := fmt.Sprintf("%s/%s  %s  %.1ffps", formatDuration(st.Position), formatDuration(st.Duration), mode, st.FPSActual)
-	right := fmt.Sprintf("%s %s", muted, paused)
+	right := fmt.Sprintf("%s %s", audioLabel, paused)
 	if st.Err != "" {
 		right = "error"
 	}
