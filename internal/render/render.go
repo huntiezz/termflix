@@ -30,13 +30,20 @@ type ScaledFrame struct {
 }
 
 // ScaleFrame scales the frame to fit/fill the given terminal size, preserving aspect ratio.
-func ScaleFrame(f FrameBuffer, termCols, termRows int, fit bool) ScaledFrame {
+// pxPerCellY controls how many vertical pixels each terminal cell represents for a given renderer:
+// - blocks: 2 (upper/lower half block)
+// - braille: 4 (2x4 dots)
+// - ascii: 1 (one character row)
+func ScaleFrame(f FrameBuffer, termCols, termRows int, fit bool, pxPerCellY int) ScaledFrame {
 	if f.Width == 0 || f.Height == 0 || termCols <= 0 || termRows <= 0 {
 		return ScaledFrame{}
 	}
+	if pxPerCellY <= 0 {
+		pxPerCellY = 2
+	}
 
 	targetW := termCols
-	targetH := termRows * 2 // we treat each cell as 2 pixels vertically by default
+	targetH := termRows * pxPerCellY
 
 	sx := float64(targetW) / float64(f.Width)
 	sy := float64(targetH) / float64(f.Height)
@@ -64,19 +71,56 @@ func ScaleFrame(f FrameBuffer, termCols, termRows int, fit bool) ScaledFrame {
 
 	out := make([]byte, outW*outH*3)
 
+	// Bilinear scaling for smoother output vs nearest-neighbor.
 	for y := 0; y < outH; y++ {
+		fy := (float64(y)+0.5)*float64(f.Height)/float64(outH) - 0.5
+		y0 := int(math.Floor(fy))
+		y1 := y0 + 1
+		wy := fy - float64(y0)
+		if y0 < 0 {
+			y0 = 0
+			y1 = 0
+			wy = 0
+		}
+		if y1 >= f.Height {
+			y1 = f.Height - 1
+		}
 		for x := 0; x < outW; x++ {
-			srcX := int(float64(x) / float64(outW) * float64(f.Width))
-			srcY := int(float64(y) / float64(outH) * float64(f.Height))
-			if srcX >= f.Width {
-				srcX = f.Width - 1
+			fx := (float64(x)+0.5)*float64(f.Width)/float64(outW) - 0.5
+			x0 := int(math.Floor(fx))
+			x1 := x0 + 1
+			wx := fx - float64(x0)
+			if x0 < 0 {
+				x0 = 0
+				x1 = 0
+				wx = 0
 			}
-			if srcY >= f.Height {
-				srcY = f.Height - 1
+			if x1 >= f.Width {
+				x1 = f.Width - 1
 			}
-			si := (srcY*f.Width + srcX) * 3
+
+			c00 := (y0*f.Width + x0) * 3
+			c10 := (y0*f.Width + x1) * 3
+			c01 := (y1*f.Width + x0) * 3
+			c11 := (y1*f.Width + x1) * 3
+
 			di := (y*outW + x) * 3
-			copy(out[di:di+3], f.Data[si:si+3])
+			for ch := 0; ch < 3; ch++ {
+				v00 := float64(f.Data[c00+ch])
+				v10 := float64(f.Data[c10+ch])
+				v01 := float64(f.Data[c01+ch])
+				v11 := float64(f.Data[c11+ch])
+				v0 := v00*(1-wx) + v10*wx
+				v1 := v01*(1-wx) + v11*wx
+				v := v0*(1-wy) + v1*wy
+				if v < 0 {
+					v = 0
+				}
+				if v > 255 {
+					v = 255
+				}
+				out[di+ch] = uint8(v + 0.5)
+			}
 		}
 	}
 

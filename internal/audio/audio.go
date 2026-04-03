@@ -62,14 +62,15 @@ func (c *Controller) startFFPlay(offset time.Duration) error {
 	args := []string{
 		"-nodisp",
 		"-autoexit",
+		"-loglevel", "error",
 	}
 	if offset > 0 {
 		args = append(args, "-ss", fmt.Sprintf("%.3f", offset.Seconds()))
 	}
-	args = append(args, c.opts.InputURL)
 	if c.muted {
 		args = append(args, "-an")
 	}
+	args = append(args, c.opts.InputURL)
 	cmd := exec.Command(c.opts.FFPlay, args...)
 	if err := cmd.Start(); err != nil {
 		return err
@@ -113,7 +114,11 @@ func (c *Controller) Stop() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.cmd != nil && c.cmd.Process != nil {
-		return c.cmd.Process.Kill()
+		_ = c.cmd.Process.Kill()
+		_ = c.cmd.Wait()
+		c.playing = false
+		c.cmd = nil
+		return nil
 	}
 	return nil
 }

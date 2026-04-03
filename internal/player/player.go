@@ -93,6 +93,16 @@ func (p *Player) Start(ctx context.Context, termCols, termRows int) {
 	go p.run(ctx, termCols, termRows)
 }
 
+// Stop cancels decoding and stops audio playback.
+func (p *Player) Stop() {
+	if p.cancelFn != nil {
+		p.cancelFn()
+	}
+	if p.audio != nil {
+		_ = p.audio.Stop()
+	}
+}
+
 func (p *Player) run(ctx context.Context, termCols, termRows int) {
 	var (
 		frameCh <-chan decoder.Frame
@@ -243,7 +253,16 @@ func (p *Player) handleFrame(f decoder.Frame, termCols, termRows int, last *time
 		Height: f.Height,
 		Data:   f.Data,
 	}
-	sf := render.ScaleFrame(buf, termCols, termRows, p.state.FitMode == util.FitModeFit)
+	pxPerCellY := 2
+	switch p.state.Mode {
+	case util.RenderModeBlocks:
+		pxPerCellY = 2
+	case util.RenderModeBraille:
+		pxPerCellY = 4
+	case util.RenderModeASCII:
+		pxPerCellY = 1
+	}
+	sf := render.ScaleFrame(buf, termCols, termRows, p.state.FitMode == util.FitModeFit, pxPerCellY)
 
 	p.state.Frame = sf
 
