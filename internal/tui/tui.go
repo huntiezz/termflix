@@ -119,7 +119,8 @@ func RunProgram(ctx context.Context, m Model) (Result, error) {
 type redrawMsg struct{}
 
 func redrawTick() tea.Cmd {
-	return tea.Tick(33*time.Millisecond, func(time.Time) tea.Msg { return redrawMsg{} })
+	// 60Hz UI cadence feels smoother and reduces "black flash" on some terminals.
+	return tea.Tick(16*time.Millisecond, func(time.Time) tea.Msg { return redrawMsg{} })
 }
 
 // Init starts the player.
@@ -159,7 +160,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		if m.ctx != nil {
-			go m.player.Start(m.ctx, m.width, m.height-2)
+			// Reserve 1 line for the status bar.
+			go m.player.Start(m.ctx, m.width, m.height-1)
 		}
 		return m, redrawTick()
 	case redrawMsg:
@@ -191,13 +193,13 @@ func (m Model) View() string {
 			body = m.lastBody
 		} else {
 			body = render.Render(st.Frame, mode)
-			body = padToViewport(body, m.width, max(0, m.height-2))
+			body = padToViewport(body, m.width, max(0, m.height-1))
 			m.lastSeq = st.Seq
 			m.lastMode = st.Mode
 			m.lastBody = body
 		}
 	} else {
-		body = padToViewport("", m.width, max(0, m.height-2))
+		body = padToViewport("", m.width, max(0, m.height-1))
 	}
 
 	status := m.renderStatus(st)
@@ -220,11 +222,13 @@ func padToViewport(body string, width, lines int) string {
 		if i < len(parts) {
 			ln = parts[i]
 		}
+		// Ensure the terminal line is fully cleared to avoid artifacts/flicker.
+		// \x1b[K clears from cursor to end of line.
 		w := lipgloss.Width(ln)
 		if w < width {
 			ln = ln + strings.Repeat(" ", width-w)
 		}
-		out = append(out, ln)
+		out = append(out, "\x1b[0m"+ln+"\x1b[K")
 	}
 	return strings.Join(out, "\n")
 }
