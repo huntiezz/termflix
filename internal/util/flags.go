@@ -78,10 +78,10 @@ func ParseFlags(args []string) (Config, error) {
 	}
 
 	rest := fs.Args()
-	if len(rest) == 0 {
-		return Config{}, errors.New("no input provided; pass a file, URL, or '-' for stdin")
+	input := ""
+	if len(rest) > 0 {
+		input = rest[0]
 	}
-	input := rest[0]
 
 	mode := RenderMode(strings.ToLower(*modeStr))
 	switch mode {
