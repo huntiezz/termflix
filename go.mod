@@ -1,4 +1,4 @@
-module github.com/example/termflix
+module github.com/zeeni/termflix
 
 go 1.22
 
