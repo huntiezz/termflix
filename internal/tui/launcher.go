@@ -141,8 +141,9 @@ func (m launcherModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m launcherModel) View() string {
 	const panelW = 80
 
-	bgColor := lipgloss.Color("#0b0f14")
-	bg := lipgloss.NewStyle().Background(bgColor).Foreground(lipgloss.Color("#e5e7eb"))
+	// Neutral grayscale palette (avoid blue-tinted backgrounds).
+	bgColor := lipgloss.Color("#000000")
+	fg := lipgloss.NewStyle().Foreground(lipgloss.Color("#e5e7eb"))
 
 	center := lipgloss.NewStyle().Width(panelW).Align(lipgloss.Center)
 	muted := lipgloss.NewStyle().Foreground(lipgloss.Color("#9ca3af"))
@@ -154,12 +155,14 @@ func (m launcherModel) View() string {
 
 	// Opencode-like: simple dark input bar.
 	inputBarStyle := lipgloss.NewStyle().
-		Background(lipgloss.Color("#111827")).
+		Background(lipgloss.Color("#141414")).
 		Foreground(lipgloss.Color("#e5e7eb")).
 		Padding(0, 2).
 		MarginTop(0).
 		Width(panelW - 6)
-	inputBar := center.Render(inputBarStyle.Render(strings.TrimRight(m.input.View(), " ")))
+	// Force a hard reset after the bar so its background doesn't "bleed"
+	// into following lines on some Windows terminals.
+	inputBar := center.Render(inputBarStyle.Render(strings.TrimRight(m.input.View(), " ")) + "\x1b[0m")
 
 	fpsLabel := kv.Render("source")
 	if m.cfg.FPS > 0 {
@@ -186,7 +189,7 @@ func (m launcherModel) View() string {
 	body.WriteString("\n\n")
 	body.WriteString(footer)
 
-	out := bg.Render(body.String())
+	out := fg.Render(body.String())
 	if m.width > 0 && m.height > 0 {
 		// Fill the entire viewport with background color, then center the panel.
 		return lipgloss.Place(
