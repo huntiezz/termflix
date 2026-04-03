@@ -12,18 +12,14 @@ import (
 
 // CheckRequiredBinaries verifies presence of core external dependencies.
 func CheckRequiredBinaries(cfg Config) error {
-	ffmpeg, err := ResolveBinary(cfg.FFMPEGPath, "ffmpeg")
+	_, err := ResolveBinary(cfg.FFMPEGPath, "ffmpeg")
 	if err != nil {
 		return dependencyError("ffmpeg", cfg.FFMPEGPath, err)
 	}
-	ffprobe, err := ResolveBinary(cfg.FFProbePath, "ffprobe")
+	_, err = ResolveBinary(cfg.FFProbePath, "ffprobe")
 	if err != nil {
 		return dependencyError("ffprobe", cfg.FFProbePath, err)
 	}
-
-	// Update cfg paths to resolved absolute binaries when possible.
-	_ = ffmpeg
-	_ = ffprobe
 	return nil
 }
 
@@ -40,7 +36,7 @@ func CheckYouTubeBinary(ytdlpPath string) error {
 	if ytdlpPath == "" {
 		ytdlpPath = "yt-dlp"
 	}
-	if _, err := exec.LookPath(ytdlpPath); err != nil {
+	if _, err := ResolveBinary(ytdlpPath, "yt-dlp"); err != nil {
 		msg := "yt-dlp not found (looked for %q). Install yt-dlp to play YouTube URLs.\n\nWindows:\n- winget: winget install yt-dlp.yt-dlp\n- scoop: scoop install yt-dlp\n\nmacOS: brew install yt-dlp\nLinux: use your package manager or pipx"
 		if runtime.GOOS == "windows" {
 			return fmt.Errorf(msg, ytdlpPath)
@@ -84,10 +80,20 @@ func ResolveBinary(configured, tool string) (string, error) {
 		return "", fmt.Errorf("not found on PATH")
 	}
 
+	// "where.exe" often succeeds even when PATH updates are partial.
+	if p, err := windowsWhere(tool); err == nil && p != "" {
+		return p, nil
+	}
+
 	for _, c := range windowsCandidates(tool) {
 		if fileExists(c) {
 			return c, nil
 		}
+	}
+
+	// Last resort: scan common winget package directory for the binary.
+	if p, err := windowsWingetScan(tool); err == nil && p != "" {
+		return p, nil
 	}
 	return "", fmt.Errorf("not found on PATH and not found in common locations")
 }
@@ -134,5 +140,68 @@ func windowsCandidates(tool string) []string {
 	}
 
 	return out
+}
+
+func windowsWhere(tool string) (string, error) {
+	cmd := exec.Command("where.exe", tool)
+	b, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// Prefer real executables, not cmd scripts.
+		if strings.HasSuffix(strings.ToLower(line), ".exe") && fileExists(line) {
+			return line, nil
+		}
+	}
+	return "", fmt.Errorf("where.exe did not return an .exe path")
+}
+
+func windowsWingetScan(tool string) (string, error) {
+	la := os.Getenv("LOCALAPPDATA")
+	if la == "" {
+		return "", fmt.Errorf("LOCALAPPDATA not set")
+	}
+
+	// Common winget location: %LOCALAPPDATA%\Microsoft\WinGet\Packages\...
+	root := filepath.Join(la, "Microsoft", "WinGet", "Packages")
+	st, err := os.Stat(root)
+	if err != nil || !st.IsDir() {
+		return "", fmt.Errorf("winget packages dir not found")
+	}
+
+	target := tool + ".exe"
+
+	// Keep it bounded: only scan up to N entries to avoid hanging on huge directories.
+	const maxDirs = 2500
+	seen := 0
+
+	var found string
+	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			seen++
+			if seen > maxDirs {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.EqualFold(d.Name(), target) {
+			found = path
+			return errors.New("found") // sentinel to stop walk early
+		}
+		return nil
+	})
+
+	if found != "" && fileExists(found) {
+		return found, nil
+	}
+	return "", fmt.Errorf("not found under %s", root)
 }
 

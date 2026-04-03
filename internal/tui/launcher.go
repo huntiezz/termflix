@@ -3,7 +3,6 @@ package tui
 import (
 	"context"
 	"fmt"
-	"math"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -67,9 +66,13 @@ type launcherModel struct {
 func newLauncherModel(cfg util.Config) launcherModel {
 	ti := textinput.New()
 	ti.Placeholder = "video file path, YouTube URL, or '-' for stdin"
+	ti.Prompt = ""
 	ti.Focus()
 	ti.CharLimit = 4096
-	ti.Width = 60
+	ti.Width = 66
+	ti.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#e5e7eb"))
+	ti.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280"))
+	ti.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#e5e7eb"))
 
 	return launcherModel{
 		cfg:   cfg,
@@ -136,38 +139,48 @@ func (m launcherModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m launcherModel) View() string {
-	bg := lipgloss.NewStyle().Background(lipgloss.Color("#0b0f14")).Foreground(lipgloss.Color("#e5e7eb"))
+	const panelW = 80
 
-	logo := renderGradientASCII(termflixASCII, "#64748b", "#f8fafc")
-	sub := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#94a3b8")).
-		Render("Watch videos in your terminal. Paste a file path, YouTube URL, or '-' for stdin.")
+	bgColor := lipgloss.Color("#0b0f14")
+	bg := lipgloss.NewStyle().Background(bgColor).Foreground(lipgloss.Color("#e5e7eb"))
 
-	accent := lipgloss.NewStyle().Foreground(lipgloss.Color("#60a5fa")).Render("│")
-	inputBox := lipgloss.NewStyle().
+	center := lipgloss.NewStyle().Width(panelW).Align(lipgloss.Center)
+	muted := lipgloss.NewStyle().Foreground(lipgloss.Color("#9ca3af"))
+	kv := lipgloss.NewStyle().Foreground(lipgloss.Color("#d1d5db"))
+
+	// Flat logo (no gradients, no colored accents).
+	logo := center.Render(termflixASCII)
+	sub := center.Render(muted.Render("Paste a file path, YouTube URL, or '-' for stdin."))
+
+	// Opencode-like: simple dark input bar.
+	inputBarStyle := lipgloss.NewStyle().
 		Background(lipgloss.Color("#111827")).
 		Foreground(lipgloss.Color("#e5e7eb")).
-		Padding(0, 1).
-		Width(74).
-		Render(accent + " " + m.input.View())
+		Padding(0, 2).
+		MarginTop(0).
+		Width(panelW - 6)
+	inputBar := center.Render(inputBarStyle.Render(strings.TrimRight(m.input.View(), " ")))
 
-	hint := lipgloss.NewStyle().Foreground(lipgloss.Color("#94a3b8")).Render
-	kv := lipgloss.NewStyle().Foreground(lipgloss.Color("#cbd5e1")).Render
-
-	fpsLabel := kv("source")
+	fpsLabel := kv.Render("source")
 	if m.cfg.FPS > 0 {
-		fpsLabel = kv(fmt.Sprintf("cap %d", m.cfg.FPS))
+		fpsLabel = kv.Render(fmt.Sprintf("cap %d", m.cfg.FPS))
 	}
 
-	meta := hint(fmt.Sprintf("mode %s   audio %s   fps %s   mute %v", kv(string(m.cfg.Mode)), kv(string(m.cfg.AudioEngine)), fpsLabel, m.cfg.Mute))
-	footer := hint("enter start    m mode    a audio    x mute    +/- fps-cap    q quit")
+	meta := center.Render(muted.Render(fmt.Sprintf("mode %s   audio %s   fps %s   mute %v",
+		kv.Render(string(m.cfg.Mode)),
+		kv.Render(string(m.cfg.AudioEngine)),
+		fpsLabel,
+		m.cfg.Mute,
+	)))
+
+	footer := center.Render(muted.Render("enter start    q quit    m mode    a audio    x mute    +/- fps-cap"))
 
 	body := strings.Builder{}
 	body.WriteString(logo)
 	body.WriteString("\n\n")
 	body.WriteString(sub)
 	body.WriteString("\n\n")
-	body.WriteString(inputBox)
+	body.WriteString(inputBar)
 	body.WriteString("\n\n")
 	body.WriteString(meta)
 	body.WriteString("\n\n")
@@ -175,7 +188,16 @@ func (m launcherModel) View() string {
 
 	out := bg.Render(body.String())
 	if m.width > 0 && m.height > 0 {
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, out)
+		// Fill the entire viewport with background color, then center the panel.
+		return lipgloss.Place(
+			m.width,
+			m.height,
+			lipgloss.Center,
+			lipgloss.Center,
+			out,
+			lipgloss.WithWhitespaceChars(" "),
+			lipgloss.WithWhitespaceBackground(bgColor),
+		)
 	}
 	return out
 }
@@ -187,63 +209,3 @@ const termflixASCII = `
    ██║   ██╔══╝  ██╔══██╗██║╚██╔╝██║██╔══╝  ██║     ██║ ██╔██╗ 
    ██║   ███████╗██║  ██║██║ ╚═╝ ██║██║     ███████╗██║██╔╝ ██╗
    ╚═╝   ╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝╚═╝     ╚══════╝╚═╝╚═╝  ╚═╝`
-
-func renderGradientASCII(ascii, startHex, endHex string) string {
-	lines := strings.Split(ascii, "\n")
-	// Find max width for consistent gradient mapping.
-	maxW := 0
-	for _, ln := range lines {
-		if w := lipgloss.Width(ln); w > maxW {
-			maxW = w
-		}
-	}
-	if maxW == 0 {
-		return ""
-	}
-
-	var b strings.Builder
-	for li, ln := range lines {
-		_ = li
-		runes := []rune(ln)
-		for i, r := range runes {
-			if r == ' ' {
-				b.WriteRune(r)
-				continue
-			}
-			t := float64(i) / float64(max(1, maxW-1))
-			c := lerpHex(startHex, endHex, t)
-			b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(c)).Render(string(r)))
-		}
-		if li != len(lines)-1 {
-			b.WriteByte('\n')
-		}
-	}
-	return b.String()
-}
-
-func lerpHex(a, b string, t float64) string {
-	ar, ag, ab := hexToRGB(a)
-	br, bg, bb := hexToRGB(b)
-	t = math.Max(0, math.Min(1, t))
-	r := uint8(math.Round(float64(ar) + (float64(br)-float64(ar))*t))
-	g := uint8(math.Round(float64(ag) + (float64(bg)-float64(ag))*t))
-	bl := uint8(math.Round(float64(ab) + (float64(bb)-float64(ab))*t))
-	return fmt.Sprintf("#%02x%02x%02x", r, g, bl)
-}
-
-func hexToRGB(s string) (uint8, uint8, uint8) {
-	s = strings.TrimPrefix(strings.TrimSpace(s), "#")
-	if len(s) != 6 {
-		return 255, 255, 255
-	}
-	var v uint64
-	_, _ = fmt.Sscanf(s, "%06x", &v)
-	return uint8(v >> 16), uint8((v >> 8) & 0xff), uint8(v & 0xff)
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}

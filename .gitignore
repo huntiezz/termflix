@@ -1,1 +1,29 @@
+# Build outputs
 bin/
+dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go test / coverage
+*.test
+*.out
+coverage.txt
+
+# Dependency / workspace
+/vendor/
+
+# Logs
+*.log
+
+# OS cruft
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editor/IDE
+.vscode/
+.idea/
+*.iml

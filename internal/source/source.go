@@ -85,10 +85,13 @@ func resolveYouTube(ctx context.Context, rawURL, ytdlpPath string) (Source, erro
 	// Use "-g" to print direct media URL(s). It's more stable than parsing -J JSON
 	// across extractor variations.
 	//
-	// Output is typically 1-2 lines (video URL, audio URL). For playback we can
-	// hand ffmpeg the first line and let it handle muxing for many formats.
+	// Output is typically:
+	//  - title line
+	//  - 1+ URL lines
+	//
+	// We select the first URL line; ffmpeg will handle many direct media URLs.
 	cmd := exec.CommandContext(ctx, ytdlpPath,
-		"-f", "bv*+ba/b",
+		"-f", "best",
 		"--no-playlist",
 		"--no-warnings",
 		"--print", "title",
@@ -113,7 +116,13 @@ func resolveYouTube(ctx context.Context, rawURL, ytdlpPath string) (Source, erro
 		return Source{}, fmt.Errorf("yt-dlp did not return expected output (title + url)")
 	}
 	title := lines[0]
-	playURL := lines[1]
+	playURL := ""
+	for _, ln := range lines[1:] {
+		if strings.HasPrefix(ln, "http://") || strings.HasPrefix(ln, "https://") {
+			playURL = ln
+			break
+		}
+	}
 	if playURL == "" {
 		return Source{}, fmt.Errorf("yt-dlp did not return a playable URL")
 	}
