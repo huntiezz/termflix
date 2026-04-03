@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/huntiezz/termflix/internal/source"
@@ -16,6 +18,7 @@ type Info struct {
 	Duration  time.Duration
 	Width     int
 	Height    int
+	FPS       float64
 	Title     string
 	StreamURL string
 }
@@ -39,6 +42,7 @@ type ffprobeJSON struct {
 		CodecType string `json:"codec_type"`
 		Width     int    `json:"width"`
 		Height    int    `json:"height"`
+		AvgFrameRate string `json:"avg_frame_rate"`
 	} `json:"streams"`
 }
 
@@ -86,10 +90,12 @@ func Probe(ctx context.Context, ffprobePath string, src source.Source) (Info, er
 	}
 
 	var width, height int
+	var fps float64
 	for _, s := range data.Streams {
 		if s.CodecType == "video" {
 			width = s.Width
 			height = s.Height
+			fps = parseFFProbeRate(s.AvgFrameRate)
 			break
 		}
 	}
@@ -103,8 +109,33 @@ func Probe(ctx context.Context, ffprobePath string, src source.Source) (Info, er
 		Duration:  duration,
 		Width:     width,
 		Height:    height,
+		FPS:       fps,
 		Title:     title,
 		StreamURL: src.PlayURL,
 	}, nil
+}
+
+func parseFFProbeRate(s string) float64 {
+	s = strings.TrimSpace(s)
+	if s == "" || s == "0/0" {
+		return 0
+	}
+	if strings.Contains(s, "/") {
+		parts := strings.SplitN(s, "/", 2)
+		if len(parts) != 2 {
+			return 0
+		}
+		num, err1 := strconv.ParseFloat(parts[0], 64)
+		den, err2 := strconv.ParseFloat(parts[1], 64)
+		if err1 != nil || err2 != nil || den == 0 {
+			return 0
+		}
+		return num / den
+	}
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0
+	}
+	return v
 }
 

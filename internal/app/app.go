@@ -61,6 +61,12 @@ func (a *App) Run(ctx context.Context) error {
 		return err
 	}
 
+	if src.Type == source.TypeYouTube {
+		if err := util.CheckYouTubeBinary(cfg.YTDLPPath); err != nil {
+			return err
+		}
+	}
+
 	meta, err := media.Probe(ctx, cfg.FFProbePath, src)
 	if err != nil {
 		return fmt.Errorf("probe media: %w", err)
@@ -68,7 +74,7 @@ func (a *App) Run(ctx context.Context) error {
 
 	playCfg := player.Config{
 		FFMPEGPath: cfg.FFMPEGPath,
-		FPS:        cfg.FPS,
+		FPSCap:     cfg.FPS,
 		Mode:       cfg.Mode,
 		FitMode:    cfg.FitMode,
 		Width:      cfg.Width,

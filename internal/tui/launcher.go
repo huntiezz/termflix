@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -119,11 +120,11 @@ func (m launcherModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.Mute):
 			m.cfg.Mute = !m.cfg.Mute
 		case key.Matches(msg, m.keys.FPSUp):
-			if m.cfg.FPS < 60 {
+			if m.cfg.FPS < 240 {
 				m.cfg.FPS++
 			}
 		case key.Matches(msg, m.keys.FPSDn):
-			if m.cfg.FPS > 1 {
+			if m.cfg.FPS > 0 {
 				m.cfg.FPS--
 			}
 		}
@@ -135,34 +136,114 @@ func (m launcherModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m launcherModel) View() string {
-	title := lipgloss.NewStyle().Bold(true).Render("termflix")
-	sub := lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render("Terminal video player (ffmpeg + Unicode renderers)")
+	bg := lipgloss.NewStyle().Background(lipgloss.Color("#0b0f14")).Foreground(lipgloss.Color("#e5e7eb"))
 
-	card := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		Padding(1, 2).
-		Width(72)
+	logo := renderGradientASCII(termflixASCII, "#64748b", "#f8fafc")
+	sub := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#94a3b8")).
+		Render("Watch videos in your terminal. Paste a file path, YouTube URL, or '-' for stdin.")
 
-	line := lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render
+	accent := lipgloss.NewStyle().Foreground(lipgloss.Color("#60a5fa")).Render("│")
+	inputBox := lipgloss.NewStyle().
+		Background(lipgloss.Color("#111827")).
+		Foreground(lipgloss.Color("#e5e7eb")).
+		Padding(0, 1).
+		Width(74).
+		Render(accent + " " + m.input.View())
+
+	hint := lipgloss.NewStyle().Foreground(lipgloss.Color("#94a3b8")).Render
+	kv := lipgloss.NewStyle().Foreground(lipgloss.Color("#cbd5e1")).Render
+
+	fpsLabel := kv("source")
+	if m.cfg.FPS > 0 {
+		fpsLabel = kv(fmt.Sprintf("cap %d", m.cfg.FPS))
+	}
+
+	meta := hint(fmt.Sprintf("mode %s   audio %s   fps %s   mute %v", kv(string(m.cfg.Mode)), kv(string(m.cfg.AudioEngine)), fpsLabel, m.cfg.Mute))
+	footer := hint("enter start    m mode    a audio    x mute    +/- fps-cap    q quit")
 
 	body := strings.Builder{}
-	body.WriteString(title)
-	body.WriteString("\n")
+	body.WriteString(logo)
+	body.WriteString("\n\n")
 	body.WriteString(sub)
 	body.WriteString("\n\n")
-	body.WriteString("Source:\n")
-	body.WriteString(m.input.View())
+	body.WriteString(inputBox)
 	body.WriteString("\n\n")
-	body.WriteString(fmt.Sprintf("Mode:  %s   Audio: %s   FPS: %d   Mute: %v\n",
-		m.cfg.Mode, m.cfg.AudioEngine, m.cfg.FPS, m.cfg.Mute,
-	))
-	body.WriteString("\n")
-	body.WriteString(line("Keys: enter=start  m=mode  a=audio  x=mute  +/-=fps  q=quit"))
+	body.WriteString(meta)
+	body.WriteString("\n\n")
+	body.WriteString(footer)
 
-	out := card.Render(body.String())
+	out := bg.Render(body.String())
 	if m.width > 0 && m.height > 0 {
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, out)
 	}
 	return out
 }
 
+const termflixASCII = `
+████████╗███████╗██████╗ ███╗   ███╗███████╗██╗     ██╗██╗  ██╗
+╚══██╔══╝██╔════╝██╔══██╗████╗ ████║██╔════╝██║     ██║╚██╗██╔╝
+   ██║   █████╗  ██████╔╝██╔████╔██║█████╗  ██║     ██║ ╚███╔╝ 
+   ██║   ██╔══╝  ██╔══██╗██║╚██╔╝██║██╔══╝  ██║     ██║ ██╔██╗ 
+   ██║   ███████╗██║  ██║██║ ╚═╝ ██║██║     ███████╗██║██╔╝ ██╗
+   ╚═╝   ╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝╚═╝     ╚══════╝╚═╝╚═╝  ╚═╝`
+
+func renderGradientASCII(ascii, startHex, endHex string) string {
+	lines := strings.Split(ascii, "\n")
+	// Find max width for consistent gradient mapping.
+	maxW := 0
+	for _, ln := range lines {
+		if w := lipgloss.Width(ln); w > maxW {
+			maxW = w
+		}
+	}
+	if maxW == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	for li, ln := range lines {
+		_ = li
+		runes := []rune(ln)
+		for i, r := range runes {
+			if r == ' ' {
+				b.WriteRune(r)
+				continue
+			}
+			t := float64(i) / float64(max(1, maxW-1))
+			c := lerpHex(startHex, endHex, t)
+			b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(c)).Render(string(r)))
+		}
+		if li != len(lines)-1 {
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
+}
+
+func lerpHex(a, b string, t float64) string {
+	ar, ag, ab := hexToRGB(a)
+	br, bg, bb := hexToRGB(b)
+	t = math.Max(0, math.Min(1, t))
+	r := uint8(math.Round(float64(ar) + (float64(br)-float64(ar))*t))
+	g := uint8(math.Round(float64(ag) + (float64(bg)-float64(ag))*t))
+	bl := uint8(math.Round(float64(ab) + (float64(bb)-float64(ab))*t))
+	return fmt.Sprintf("#%02x%02x%02x", r, g, bl)
+}
+
+func hexToRGB(s string) (uint8, uint8, uint8) {
+	s = strings.TrimPrefix(strings.TrimSpace(s), "#")
+	if len(s) != 6 {
+		return 255, 255, 255
+	}
+	var v uint64
+	_, _ = fmt.Sscanf(s, "%06x", &v)
+	return uint8(v >> 16), uint8((v >> 8) & 0xff), uint8(v & 0xff)
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}

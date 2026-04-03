@@ -15,7 +15,7 @@ import (
 // Config controls player behaviour.
 type Config struct {
 	FFMPEGPath string
-	FPS        int
+	FPSCap     int
 	Mode       util.RenderMode
 	FitMode    util.FitMode
 	Width      int
@@ -65,7 +65,7 @@ func New(src source.Source, meta media.Info, cfg Config, audio AudioController) 
 	p.state.Duration = meta.Duration
 	p.state.Mode = cfg.Mode
 	p.state.FitMode = cfg.FitMode
-	p.state.FPS = cfg.FPS
+	p.state.FPS = cfg.FPSCap
 	p.state.Muted = audio != nil && audio.IsMuted()
 	return p
 }
@@ -97,7 +97,7 @@ func (p *Player) run(ctx context.Context, termCols, termRows int) {
 			InputURL:   p.meta.StreamURL,
 			Width:      p.cfg.Width,
 			Height:     p.cfg.Height,
-			FPS:        p.cfg.FPS,
+			FPSCap:     p.cfg.FPSCap,
 			StartAt:    offset.Seconds(),
 		})
 		var err error
@@ -112,7 +112,11 @@ func (p *Player) run(ctx context.Context, termCols, termRows int) {
 		_ = p.audio.Play(0)
 	}
 
-	tick := time.NewTicker(time.Second / time.Duration(p.cfg.FPS))
+	effective := p.effectiveFPS()
+	if effective <= 0 {
+		effective = 60
+	}
+	tick := time.NewTicker(time.Second / time.Duration(effective))
 	defer tick.Stop()
 
 	var lastFrameTime time.Time
@@ -156,20 +160,44 @@ func (p *Player) handleFrame(f decoder.Frame, termCols, termRows int, last *time
 
 	now := time.Now()
 	if !last.IsZero() {
-		d := now.Sub(*last).Seconds()
-		if d > 0 {
-			p.state.FPSActual = 1 / d
+		dt := now.Sub(*last)
+		sec := dt.Seconds()
+		if sec > 0 {
+			p.state.FPSActual = 1 / sec
+		}
+
+		// Drive position from real frame timing when source FPS isn't known.
+		if p.meta.FPS <= 0 {
+			p.state.Position += dt
+			if p.state.Duration > 0 && p.state.Position > p.state.Duration {
+				p.state.Position = p.state.Duration
+			}
 		}
 	}
 	*last = now
 
-	if p.state.Duration > 0 {
-		step := time.Second / time.Duration(p.cfg.FPS)
-		p.state.Position += step
-		if p.state.Position > p.state.Duration {
+	stepFPS := p.effectiveFPS()
+	if stepFPS > 0 {
+		p.state.Position += time.Second / time.Duration(stepFPS)
+		if p.state.Duration > 0 && p.state.Position > p.state.Duration {
 			p.state.Position = p.state.Duration
 		}
 	}
+}
+
+func (p *Player) effectiveFPS() int {
+	srcFPS := int(p.meta.FPS + 0.5)
+	if srcFPS <= 0 {
+		return p.cfg.FPSCap
+	}
+	// Default: use the source FPS exactly.
+	if p.cfg.FPSCap <= 0 {
+		return srcFPS
+	}
+	if srcFPS < p.cfg.FPSCap {
+		return srcFPS
+	}
+	return p.cfg.FPSCap
 }
 
 func (p *Player) TogglePause() {
