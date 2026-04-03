@@ -133,6 +133,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch {
 		case key.Matches(msg, m.keys.Quit):
+			m.player.Stop()
 			return m, tea.Quit
 		case key.Matches(msg, m.keys.TogglePause):
 			m.player.TogglePause()
