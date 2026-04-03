@@ -7,7 +7,7 @@ import (
 
 	"github.com/charmbracelet/log"
 
-	"github.com/zeeni/termflix/internal/app"
+	"github.com/huntiezz/termflix/internal/app"
 )
 
 func main() {

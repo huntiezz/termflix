@@ -10,9 +10,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/example/termflix/internal/player"
-	"github.com/example/termflix/internal/render"
-	"github.com/example/termflix/internal/util"
+	"github.com/huntiezz/termflix/internal/player"
+	"github.com/huntiezz/termflix/internal/render"
+	"github.com/huntiezz/termflix/internal/util"
 )
 
 type keyMap struct {
@@ -26,6 +26,18 @@ type keyMap struct {
 	ToggleFit   key.Binding
 	ToggleMute  key.Binding
 	ToggleHelp  key.Binding
+}
+
+func (k keyMap) ShortHelp() []key.Binding {
+	return []key.Binding{k.TogglePause, k.SeekBack, k.SeekForward, k.CycleMode, k.Quit, k.ToggleHelp}
+}
+
+func (k keyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{
+		{k.TogglePause, k.Quit, k.ToggleHelp},
+		{k.SeekBack, k.SeekForward, k.SeekBackBig, k.SeekFwdBig},
+		{k.CycleMode, k.ToggleFit, k.ToggleMute},
+	}
 }
 
 func defaultKeyMap() keyMap {
