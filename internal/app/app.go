@@ -41,6 +41,17 @@ func (a *App) Run(ctx context.Context) error {
 		return err
 	}
 
+	if cfg.Input == "" {
+		res, err := tui.RunLauncher(ctx, cfg)
+		if err != nil {
+			return err
+		}
+		if !res.Started {
+			return nil
+		}
+		cfg = res.Config
+	}
+
 	if err := util.CheckRequiredBinaries(cfg); err != nil {
 		return err
 	}
